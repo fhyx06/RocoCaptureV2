@@ -13,6 +13,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequ
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -63,13 +64,20 @@ from src.models.constants import (
 )
 from src.models.save_slot import ActivityLog, SaveSlot, ShinyRecord
 from src.services.save_service import SaveService
+from src.services.settings_service import (
+    LOG_COLOR_OTHER,
+    SETTINGS_FILE_NAME,
+    THEME_DARK,
+    SettingsService,
+)
+from src.qt_ui.theme import build_stylesheet
 
 
 ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
 ICONS_DIR = ASSETS_DIR / "icons"
 SPIRITS_DIR = ASSETS_DIR / "spirits"
 LOG_FILTER_ALL = "all"
-LOG_FILTER_OTHER = "other"
+LOG_FILTER_OTHER = LOG_COLOR_OTHER
 SCROLLBAR_GUTTER_WIDTH = 6
 LOG_FILTER_OPTIONS = [
     ("全部", LOG_FILTER_ALL),
@@ -78,14 +86,6 @@ LOG_FILTER_OPTIONS = [
     ("属性", POOL_ELEMENT),
     ("其他", LOG_FILTER_OTHER),
 ]
-
-# 日志颜色权重：家族使用最频繁，因此最亮；随机次之；属性和其他保持低饱和。
-LOG_COLORS = {
-    POOL_FAMILY: {"accent": "#f3b34b", "text": "#f1d39a", "bg": "#2b251b"},
-    POOL_RANDOM: {"accent": "#78a9ff", "text": "#b9d3ff", "bg": "#1f2736"},
-    POOL_ELEMENT: {"accent": "#6fb8a6", "text": "#a8d9ce", "bg": "#1d2b2a"},
-    LOG_FILTER_OTHER: {"accent": "#8e98a8", "text": "#b8c0cc", "bg": "#222630"},
-}
 
 
 def spirit_display(spirit: dict) -> str:
@@ -584,9 +584,16 @@ class ShinyRecordCard(QWidget):
 class QtMainWindow(QMainWindow):
     """Qt 试验版主窗口。"""
 
-    def __init__(self, save_service: SaveService):
+    def __init__(
+        self,
+        save_service: SaveService,
+        settings_service: SettingsService | None = None,
+    ):
         super().__init__()
         self._save_svc = save_service
+        self._settings_svc = settings_service or SettingsService(
+            self._save_svc.saves_dir / SETTINGS_FILE_NAME
+        )
         self._seasons = load_seasons()
         self._family_items: dict[str, list[QTreeWidgetItem]] = {}
         self._family_count_labels: dict[str, list[QLabel]] = {}
@@ -676,9 +683,15 @@ class QtMainWindow(QMainWindow):
         body.setSpacing(0)
 
         # 左侧导航
+        sidebar_panel = QWidget()
+        sidebar_panel.setObjectName("sidebarPanel")
+        sidebar_panel.setFixedWidth(154)
+        sidebar_layout = QVBoxLayout(sidebar_panel)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(0)
+
         self.sidebar = QListWidget()
         self.sidebar.setObjectName("sidebar")
-        self.sidebar.setFixedWidth(154)
         self.sidebar.setSpacing(6)
         self.sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.sidebar.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -692,7 +705,22 @@ class QtMainWindow(QMainWindow):
             item = QListWidgetItem(f"{icon}  {label}")
             item.setSizeHint(QSize(124, 48))
             self.sidebar.addItem(item)
-        body.addWidget(self.sidebar)
+        sidebar_layout.addWidget(self.sidebar, 1)
+
+        sidebar_footer = QWidget()
+        sidebar_footer.setObjectName("sidebarFooter")
+        footer_layout = QVBoxLayout(sidebar_footer)
+        footer_layout.setContentsMargins(10, 8, 10, 12)
+        footer_layout.setSpacing(0)
+        self.theme_toggle_btn = QPushButton()
+        self.theme_toggle_btn.setObjectName("themeToggleButton")
+        self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_toggle_btn.clicked.connect(self._toggle_theme)
+        footer_layout.addWidget(self.theme_toggle_btn)
+        sidebar_layout.addWidget(sidebar_footer)
+        self._update_theme_button()
+
+        body.addWidget(sidebar_panel)
 
         # 分隔竖线
         vsep = QWidget()
@@ -1252,6 +1280,27 @@ class QtMainWindow(QMainWindow):
         if index >= 0:
             self.page_stack.setCurrentIndex(index)
 
+    def _toggle_theme(self) -> None:
+        self._settings_svc.toggle_theme()
+        self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(build_stylesheet(self._settings_svc.theme))
+        self._update_theme_button()
+        slot = self._save_svc.current
+        if slot and hasattr(self, "log_text"):
+            self._load_logs(slot.logs)
+
+    def _update_theme_button(self) -> None:
+        if not hasattr(self, "theme_toggle_btn"):
+            return
+        if self._settings_svc.theme == THEME_DARK:
+            self.theme_toggle_btn.setText("☀  浅色模式")
+        else:
+            self.theme_toggle_btn.setText("☾  深色模式")
+
     def _refresh_save_combo(self) -> None:
         current = self._save_svc.current_name or ""
         self.save_combo.blockSignals(True)
@@ -1784,7 +1833,8 @@ class QtMainWindow(QMainWindow):
 
     def _log_row_html(self, log: ActivityLog) -> str:
         pool_key = self._log_pool_key(log.pool_type)
-        colors = LOG_COLORS.get(pool_key, LOG_COLORS[LOG_FILTER_OTHER])
+        log_colors = self._settings_svc.log_colors()
+        colors = log_colors.get(pool_key, log_colors[LOG_FILTER_OTHER])
         label = escape(self._pool_label(log.pool_type))
         text = escape(log.format_display())
         return (

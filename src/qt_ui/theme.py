@@ -9,7 +9,10 @@ _CHEVRON_RIGHT_ICON = (
     Path(__file__).resolve().parents[1] / "assets" / "icons" / "chevron_right.svg"
 ).as_posix()
 
-APP_STYLESHEET = """
+THEME_DARK = "dark"
+THEME_LIGHT = "light"
+
+_BASE_STYLESHEET = """
 QMainWindow,
 QDialog {
     background: #181a1f;
@@ -96,6 +99,29 @@ QListWidget#sidebar::item:hover {
 QListWidget#sidebar::item:selected {
     background: #243044;
     color: #ffffff;
+}
+
+QWidget#sidebarPanel {
+    background: #111318;
+}
+
+QWidget#sidebarFooter {
+    background: transparent;
+}
+
+QPushButton#themeToggleButton {
+    background: #1c222b;
+    border-color: #303746;
+    color: #aeb8c7;
+    min-height: 34px;
+    text-align: left;
+    padding: 7px 10px;
+}
+
+QPushButton#themeToggleButton:hover {
+    background: #243044;
+    border-color: #48566a;
+    color: #eef3f8;
 }
 
 QWidget#logColumn {
@@ -671,3 +697,86 @@ QListWidget#sidebar QScrollBar:horizontal {
 """.replace("__CHEVRON_DOWN_ICON__", _CHEVRON_DOWN_ICON).replace(
     "__CHEVRON_RIGHT_ICON__", _CHEVRON_RIGHT_ICON
 )
+
+_LIGHT_COLOR_MAP = {
+    "#181a1f": "#f4f6f8",
+    "#dce2ea": "#1f2933",
+    "#303746": "#d8dee8",
+    "#1b1e24": "#eef2f6",
+    "#2a2f38": "#d8dee8",
+    "#78a9ff": "#2563eb",
+    "#aab4c3": "#64748b",
+    "#eef3f8": "#111827",
+    "#8e98a8": "#64748b",
+    "#111318": "#e9eef5",
+    "#aeb8c7": "#475569",
+    "#1c222b": "#dde5ef",
+    "#243044": "#d7e5f7",
+    "#15171c": "#f8fafc",
+    "#8f9aaa": "#64748b",
+    "#20242b": "#ffffff",
+    "#e8ecf2": "#111827",
+    "#f39c12": "#d97706",
+    "#e74c3c": "#dc2626",
+    "#252b35": "#f7f9fc",
+    "#384151": "#cbd5e1",
+    "#365d9d": "#bfdbfe",
+    "#465164": "#94a3b8",
+    "#2d3542": "#edf2f7",
+    "#48566a": "#94a3b8",
+    "#202631": "#e2e8f0",
+    "#5d88cf": "#2563eb",
+    "#1d3328": "#e8f7ef",
+    "#2f7d57": "#2f9b65",
+    "#bff4d2": "#166534",
+    "#372226": "#fff0f2",
+    "#8a3a46": "#c24152",
+    "#ffccd3": "#9f1239",
+    "#b7791f": "#d97706",
+    "#e0a536": "#f59e0b",
+    "#fff8e6": "#ffffff",
+    "#c98923": "#b45309",
+    "#1c2027": "#f1f5f9",
+    "#242a34": "#edf2f7",
+    "#f3b34b": "#b7791f",
+    "#9a6c2e": "#c0841a",
+    "#ff8e8e": "#dc2626",
+    "#a84b4b": "#ef4444",
+    "#52d6b1": "#0f9f7a",
+    "#34404f": "#94a3b8",
+    "#4a5a70": "#64748b",
+    "#506079": "#94a3b8",
+    "#28364c": "#dbeafe",
+    "#6d99df": "#2563eb",
+    "#7f8a9a": "#64748b",
+    "#6f7a8a": "#64748b",
+    "#9da8b8": "#64748b",
+    "#3a4351": "#94a3b8",
+}
+
+_LIGHT_STYLESHEET_OVERRIDES = """
+QListWidget#sidebar::item:selected,
+QTreeWidget::item:selected,
+QListWidget::item:selected,
+QTableWidget::item:selected,
+QComboBox QAbstractItemView {
+    color: #111827;
+}
+
+QComboBox QAbstractItemView {
+    selection-color: #111827;
+}
+"""
+
+
+def build_stylesheet(theme_name: str = THEME_DARK) -> str:
+    """根据主题名生成 Qt 全局样式。"""
+    stylesheet = _BASE_STYLESHEET
+    if theme_name == THEME_LIGHT:
+        for dark_color, light_color in _LIGHT_COLOR_MAP.items():
+            stylesheet = stylesheet.replace(dark_color, light_color)
+        stylesheet += _LIGHT_STYLESHEET_OVERRIDES
+    return stylesheet
+
+
+APP_STYLESHEET = build_stylesheet(THEME_DARK)

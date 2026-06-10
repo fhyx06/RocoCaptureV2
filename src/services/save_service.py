@@ -9,6 +9,7 @@ from typing import Callable
 from src.models.save_slot import SaveSlot
 from src.models.constants import SAVES_DIR
 from src.assets.season_loader import load_seasons
+from src.services.settings_service import SETTINGS_FILE_NAME
 
 
 class SaveService:
@@ -29,6 +30,8 @@ class SaveService:
         """返回所有存档文件名（不含扩展名）"""
         result = []
         for f in self.saves_dir.glob("*.json"):
+            if f.name == SETTINGS_FILE_NAME:
+                continue
             name = f.stem
             if name:  # 跳过空文件名
                 result.append(name)
