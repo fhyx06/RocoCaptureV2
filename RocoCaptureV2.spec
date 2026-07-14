@@ -38,7 +38,8 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # onedir 发布包会再压缩为 zip；避免 UPX 在部分机器上增加解压和安全扫描开销。
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -55,7 +56,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name=f'RocoCaptureV2-v{APP_VERSION}-win-x64',
 )

@@ -8,15 +8,21 @@ _WAV_PATH = Path(__file__).parent.parent / "assets" / "sounds" / "beep.wav"
 
 
 def beep() -> None:
-    """播放按钮反馈音效（非阻塞）；WAV 缺失时回退到系统蜂鸣"""
+    """播放按钮反馈音效；WAV 使用系统异步播放，不为每次点击创建线程。"""
+    if _WAV_PATH.exists():
+        try:
+            winsound.PlaySound(
+                str(_WAV_PATH),
+                winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
+            )
+            return
+        except (RuntimeError, OSError):
+            pass
     threading.Thread(target=_beep_impl, daemon=True).start()
 
 
 def _beep_impl() -> None:
     try:
-        if _WAV_PATH.exists():
-            winsound.PlaySound(str(_WAV_PATH), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
-        else:
-            winsound.Beep(800, 100)
+        winsound.Beep(800, 100)
     except (RuntimeError, OSError):
         pass

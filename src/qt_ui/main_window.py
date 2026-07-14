@@ -4,12 +4,12 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from functools import lru_cache
 from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, Qt, QMargins, QSize, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QIcon, QTextOption
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
@@ -79,6 +79,13 @@ SPIRITS_DIR = ASSETS_DIR / "spirits"
 LOG_FILTER_ALL = "all"
 LOG_FILTER_OTHER = LOG_COLOR_OTHER
 SCROLLBAR_GUTTER_WIDTH = 6
+PAGE_RANDOM = 0
+PAGE_FAMILY = 1
+PAGE_ELEMENT = 2
+PAGE_SHINY = 3
+PAGE_SETTINGS = 4
+PAGE_COUNT = 5
+LOG_DISPLAY_LIMIT = 500
 LOG_FILTER_OPTIONS = [
     ("全部", LOG_FILTER_ALL),
     ("家族", POOL_FAMILY),
@@ -99,26 +106,41 @@ def primary_element(spirit: dict) -> str:
     return ""
 
 
+@lru_cache(maxsize=None)
 def element_icon(element: str) -> QIcon:
     path = ICONS_DIR / f"{element}.png"
     return QIcon(str(path)) if path.exists() else QIcon()
 
 
-def spirit_icon(spirit_name: str, season: str = "") -> QIcon:
-    lookup = spirit_name.strip()
-    if re.match(r"^No\.\d+\s+", lookup):
-        lookup = re.sub(r"^No\.\d+\s+", "", lookup)
-    search_dirs = []
-    if season:
-        search_dirs.append(SPIRITS_DIR / season)
-    search_dirs.append(SPIRITS_DIR)
-    for directory in search_dirs:
-        if not directory.is_dir():
+def _normalize_spirit_name(value: str) -> str:
+    return re.sub(r"^no\.\d+\s*", "", value.strip(), flags=re.IGNORECASE)
+
+
+@lru_cache(maxsize=1)
+def _spirit_icon_index() -> tuple[dict[tuple[str, str], Path], dict[str, Path]]:
+    """一次扫描精灵图片目录，避免每个卡片都重复遍历文件系统。"""
+    by_season: dict[tuple[str, str], Path] = {}
+    fallback: dict[str, Path] = {}
+    if not SPIRITS_DIR.is_dir():
+        return by_season, fallback
+
+    for path in SPIRITS_DIR.rglob("*.png"):
+        season = path.parent.name if path.parent != SPIRITS_DIR else ""
+        name = _normalize_spirit_name(path.stem)
+        if not name:
             continue
-        for path in directory.iterdir():
-            if path.suffix.lower() == ".png" and path.stem.endswith(lookup):
-                return QIcon(str(path))
-    return QIcon()
+        by_season[(season, name)] = path
+        fallback.setdefault(name, path)
+    return by_season, fallback
+
+
+@lru_cache(maxsize=256)
+def spirit_icon(spirit_name: str, season: str = "") -> QIcon:
+    lookup = _normalize_spirit_name(spirit_name)
+    by_season, fallback = _spirit_icon_index()
+    path = by_season.get((season, lookup)) if season else None
+    path = path or fallback.get(lookup)
+    return QIcon(str(path)) if path else QIcon()
 
 
 def version_tuple(version: str) -> tuple[int, int, int] | None:
@@ -602,11 +624,18 @@ class QtMainWindow(QMainWindow):
         self._shiny_column_layouts: dict[str, QVBoxLayout] = {}
         self._shiny_cards: dict[int, ShinyRecordCard] = {}
         self._selected_shiny_index: int | None = None
-        self._network_manager = QNetworkAccessManager(self)
-        self._update_reply: QNetworkReply | None = None
+        self._built_pages: set[int] = set()
+        self._page_builders = {}
+        self._network_module = None
+        self._network_manager = None
+        self._update_reply = None
         self._update_sources: list[dict[str, str]] = []
         self._update_source_index = 0
         self._update_errors: list[str] = []
+
+        self._log_refresh_timer = QTimer(self)
+        self._log_refresh_timer.setSingleShot(True)
+        self._log_refresh_timer.timeout.connect(self._refresh_logs_from_current_slot)
 
         # 保底临界闪烁定时器
         self._flash_timer = QTimer(self)
@@ -728,14 +757,24 @@ class QtMainWindow(QMainWindow):
         vsep.setFixedWidth(1)
         body.addWidget(vsep)
 
-        # 中央堆叠页（必须早于 sidebar 信号连接，否则 _on_nav_changed 报错）
+        # 中央堆叠页（首屏只创建随机池，其余页面首次访问时再创建）
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("pageStack")
-        self._build_random_page()
-        self._build_family_page()
-        self._build_element_page()
-        self._build_shiny_page()
-        self._build_settings_page()
+        self._page_builders = {
+            PAGE_RANDOM: self._build_random_page,
+            PAGE_FAMILY: self._build_family_page,
+            PAGE_ELEMENT: self._build_element_page,
+            PAGE_SHINY: self._build_shiny_page,
+            PAGE_SETTINGS: self._build_settings_page,
+        }
+        for index in range(PAGE_COUNT):
+            if index == PAGE_RANDOM:
+                page = self._build_random_page()
+                self._built_pages.add(PAGE_RANDOM)
+            else:
+                page = QWidget()
+                page.setObjectName("lazyPagePlaceholder")
+            self.page_stack.addWidget(page)
         body.addWidget(self.page_stack, 1)
 
         # 右侧日志
@@ -825,7 +864,7 @@ class QtMainWindow(QMainWindow):
                 row.addWidget(btn)
         return row
 
-    def _build_random_page(self) -> None:
+    def _build_random_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -859,9 +898,9 @@ class QtMainWindow(QMainWindow):
         layout.addLayout(btn_row)
 
         layout.addStretch()
-        self.page_stack.addWidget(page)
+        return page
 
-    def _build_family_page(self) -> None:
+    def _build_family_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -915,7 +954,7 @@ class QtMainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
 
         layout.addWidget(splitter, 1)
-        self.page_stack.addWidget(page)
+        return page
 
     def _on_family_selected(self) -> None:
         data = self._selected_family_data()
@@ -925,7 +964,7 @@ class QtMainWindow(QMainWindow):
             self.family_detail_count.setText(str(count))
             self._set_counter_state(self.family_detail_count, count)
 
-    def _build_element_page(self) -> None:
+    def _build_element_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -973,7 +1012,7 @@ class QtMainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
 
         layout.addWidget(splitter, 1)
-        self.page_stack.addWidget(page)
+        return page
 
     def _on_element_selected(self) -> None:
         element = self._selected_element()
@@ -983,7 +1022,7 @@ class QtMainWindow(QMainWindow):
             self.element_detail_count.setText(str(count))
             self._set_counter_state(self.element_detail_count, count)
 
-    def _build_shiny_page(self) -> None:
+    def _build_shiny_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -1054,9 +1093,9 @@ class QtMainWindow(QMainWindow):
 
         layout.addLayout(columns, 1)
 
-        self.page_stack.addWidget(page)
+        return page
 
-    def _build_settings_page(self) -> None:
+    def _build_settings_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -1100,10 +1139,19 @@ class QtMainWindow(QMainWindow):
 
         layout.addStretch()
 
-        self.page_stack.addWidget(page)
+        return page
 
     def _open_github_project(self) -> None:
         QDesktopServices.openUrl(QUrl(GITHUB_PROJECT_URL))
+
+    def _network_api(self):
+        """仅在用户检查更新时加载 QtNetwork。"""
+        if self._network_module is None:
+            from PySide6 import QtNetwork
+
+            self._network_module = QtNetwork
+            self._network_manager = QtNetwork.QNetworkAccessManager(self)
+        return self._network_module
 
     def _check_for_updates(self) -> None:
         if self._update_reply is not None:
@@ -1128,16 +1176,17 @@ class QtMainWindow(QMainWindow):
 
         source = self._current_update_source()
         self.update_status.setText(f"正在连接{source['name']}...")
-        request = QNetworkRequest(QUrl(source["url"]))
+        network = self._network_api()
+        request = network.QNetworkRequest(QUrl(source["url"]))
         request.setRawHeader(b"Accept", b"application/json")
         request.setRawHeader(b"User-Agent", f"{APP_NAME}/{APP_VERSION}".encode("utf-8"))
         request.setAttribute(
-            QNetworkRequest.Attribute.CacheLoadControlAttribute,
-            QNetworkRequest.CacheLoadControl.AlwaysNetwork,
+            network.QNetworkRequest.Attribute.CacheLoadControlAttribute,
+            network.QNetworkRequest.CacheLoadControl.AlwaysNetwork,
         )
         request.setAttribute(
-            QNetworkRequest.Attribute.RedirectPolicyAttribute,
-            QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
+            network.QNetworkRequest.Attribute.RedirectPolicyAttribute,
+            network.QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
         )
         if hasattr(request, "setTransferTimeout"):
             request.setTransferTimeout(10000)
@@ -1161,14 +1210,15 @@ class QtMainWindow(QMainWindow):
             return
         self._handle_update_reply(reply)
 
-    def _handle_update_reply(self, reply: QNetworkReply) -> None:
+    def _handle_update_reply(self, reply) -> None:
         source = self._current_update_source()
         self._update_reply = None
+        network = self._network_api()
 
         try:
-            status_code = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+            status_code = reply.attribute(network.QNetworkRequest.Attribute.HttpStatusCodeAttribute)
             payload = bytes(reply.readAll()).decode("utf-8", errors="replace")
-            if reply.error() != QNetworkReply.NetworkError.NoError:
+            if reply.error() != network.QNetworkReply.NetworkError.NoError:
                 message = self._format_update_error(status_code, payload, reply.errorString(), source["name"])
                 self._try_next_update_source(message)
                 return
@@ -1276,8 +1326,35 @@ class QtMainWindow(QMainWindow):
         if reply_button == QMessageBox.StandardButton.Yes:
             QDesktopServices.openUrl(QUrl(GITHUB_RELEASES_URL))
 
+    def _ensure_page(self, index: int) -> None:
+        if index in self._built_pages:
+            return
+        builder = self._page_builders.get(index)
+        placeholder = self.page_stack.widget(index)
+        if builder is None or placeholder is None:
+            return
+
+        page = builder()
+        self.page_stack.removeWidget(placeholder)
+        placeholder.deleteLater()
+        self.page_stack.insertWidget(index, page)
+        self._built_pages.add(index)
+
+        slot = self._save_svc.current
+        if slot:
+            self._refresh_page(index, slot)
+
+    def _refresh_page(self, index: int, slot: SaveSlot) -> None:
+        if index == PAGE_FAMILY:
+            self._load_family_tree(slot)
+        elif index == PAGE_ELEMENT:
+            self._load_element_list(slot)
+        elif index == PAGE_SHINY:
+            self._load_shiny_records(slot.shiny_records)
+
     def _on_nav_changed(self, index: int) -> None:
         if index >= 0:
+            self._ensure_page(index)
             self.page_stack.setCurrentIndex(index)
 
     def _toggle_theme(self) -> None:
@@ -1291,7 +1368,7 @@ class QtMainWindow(QMainWindow):
         self._update_theme_button()
         slot = self._save_svc.current
         if slot and hasattr(self, "log_text"):
-            self._load_logs(slot.logs)
+            self._schedule_log_refresh()
 
     def _update_theme_button(self) -> None:
         if not hasattr(self, "theme_toggle_btn"):
@@ -1409,12 +1486,11 @@ class QtMainWindow(QMainWindow):
             QMessageBox.critical(self, "导出失败", str(exc))
 
     def _load_slot(self, slot: SaveSlot) -> None:
-        self.random_count.setText(str(slot.random_pool))
-        self._update_random_counter_color()
-        self._load_family_tree(slot)
-        self._load_element_list(slot)
-        self._load_shiny_records(slot.shiny_records)
-        self._load_logs(slot.logs)
+        self._update_random_display(slot.random_pool)
+        for index in sorted(self._built_pages):
+            if index != PAGE_RANDOM:
+                self._refresh_page(index, slot)
+        self._schedule_log_refresh()
 
     # ---------- 保底颜色 & 闪烁 ----------
 
@@ -1605,6 +1681,24 @@ class QtMainWindow(QMainWindow):
         return cell, count_label
 
     def _load_family_tree(self, slot: SaveSlot) -> None:
+        if self._family_items:
+            for display_name, labels in self._family_count_labels.items():
+                count = slot.family_pool.get(display_name, 0)
+                for label in labels:
+                    label.setText(str(count))
+                    self._set_family_pity_state(label, count)
+            data = self._selected_family_data()
+            if data:
+                count = slot.family_pool.get(data["name"], 0)
+                self.family_detail_title.setText(data["name"])
+                self.family_detail_count.setText(str(count))
+                self._set_counter_state(self.family_detail_count, count)
+            else:
+                self.family_detail_title.setText("请选择精灵")
+                self.family_detail_count.setText("0")
+                self._set_counter_state(self.family_detail_count, 0)
+            return
+
         # 记住哪些赛季节点是展开的 + 当前选中的精灵名称
         expanded_seasons: set[str] = set()
         selected_spirit: str | None = None
@@ -1669,6 +1763,19 @@ class QtMainWindow(QMainWindow):
     def _load_element_list(self, slot: SaveSlot) -> None:
         # 记住当前选中的属性
         selected_element = self._selected_element()
+
+        if self._element_items:
+            for element, button in self._element_items.items():
+                count = slot.element_pool.get(element, 0)
+                button.setText(f"{element}\n保底 {count}")
+                self._set_element_card_state(button, count)
+            if selected_element in self._element_items:
+                self._select_element(selected_element)
+            else:
+                self.element_detail_title.setText("请选择属性")
+                self.element_detail_count.setText("0")
+                self._set_counter_state(self.element_detail_count, 0)
+            return
 
         while self.element_grid.count():
             layout_item = self.element_grid.takeAt(0)
@@ -1781,12 +1888,26 @@ class QtMainWindow(QMainWindow):
             return record.pool_type
         return POOL_RANDOM
 
+    def _schedule_log_refresh(self, delay_ms: int = 0) -> None:
+        """合并同一轮事件循环内的多次日志刷新。"""
+        self._log_refresh_timer.start(max(0, delay_ms))
+
+    def _refresh_logs_from_current_slot(self) -> None:
+        slot = self._save_svc.current
+        if slot and hasattr(self, "log_text"):
+            self._load_logs(slot.logs)
+
     def _load_logs(self, logs: list[ActivityLog]) -> None:
         selected_filter = self._selected_log_filter()
-        visible_logs = [
-            log for log in reversed(logs)
-            if self._log_matches_filter(log, selected_filter)
-        ]
+        visible_logs: list[ActivityLog] = []
+        truncated = False
+        for log in reversed(logs):
+            if not self._log_matches_filter(log, selected_filter):
+                continue
+            if len(visible_logs) >= LOG_DISPLAY_LIMIT:
+                truncated = True
+                break
+            visible_logs.append(log)
         if not visible_logs:
             label = self._log_filter_label(selected_filter)
             self.log_text.setHtml(
@@ -1797,6 +1918,12 @@ class QtMainWindow(QMainWindow):
             return
 
         rows = [self._log_row_html(log) for log in visible_logs]
+        if truncated:
+            rows.append(
+                "<div style='color:#667285; padding:4px 2px 10px 2px;'>"
+                f"仅显示最近 {LOG_DISPLAY_LIMIT} 条匹配日志，完整记录仍保存在存档中。"
+                "</div>"
+            )
         self.log_text.setHtml(
             "<html><body style='margin:0; padding:0; "
             "font-family:\"Cascadia Mono\", \"Consolas\", monospace; font-size:12px;'>"
@@ -1806,7 +1933,7 @@ class QtMainWindow(QMainWindow):
     def _on_log_filter_changed(self) -> None:
         slot = self._save_svc.current
         if slot:
-            self._load_logs(slot.logs)
+            self._schedule_log_refresh()
 
     def _selected_log_filter(self) -> str:
         if hasattr(self, "log_filter_combo"):
@@ -1867,13 +1994,11 @@ class QtMainWindow(QMainWindow):
         return self._selected_element_name
 
     def _after_operation(self, logs: list[ActivityLog]) -> None:
-        """仅保存存档并刷新日志面板（日志重建极快，不拖性能）。"""
+        """保存存档，并把日志渲染合并到下一轮事件循环。"""
         if not logs:
             return
         self._save_svc.save_current()
-        slot = self._save_svc.current
-        if slot:
-            self._load_logs(slot.logs)
+        self._schedule_log_refresh()
 
     def _random_increase(self) -> None:
         slot = self._save_svc.current
