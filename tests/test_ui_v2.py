@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+import os
+import tempfile
+import unittest
+from unittest.mock import patch
+
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication
+
+from src.models.constants import ELEMENTS
+from src.qt_ui_v2.main_window import (
+    PAGE_COUNT,
+    PAGE_ELEMENT,
+    PAGE_FAMILY,
+    PAGE_RANDOM,
+    PAGE_SETTINGS,
+    PAGE_SHINY,
+    QtMainWindowV2,
+)
+from src.qt_ui_v2.pages.family_page import FamilyPage
+from src.qt_ui_v2.theme import apply_theme, configure_font
+from src.services.save_service import SaveService
+from src.services.settings_service import SettingsService
+
+
+class UiV2Tests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+        configure_font(cls.app)
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.save_service = SaveService(self.temp_dir.name)
+        self.slot = self.save_service.create_save("a")
+        self.family_name = next(iter(self.slot.family_pool))
+        self.settings = SettingsService(os.path.join(self.temp_dir.name, "settings.json"))
+        apply_theme(self.app, self.settings.theme)
+        self.window = QtMainWindowV2(self.save_service, self.settings)
+        self.window.show()
+        self.app.processEvents()
+
+    def tearDown(self) -> None:
+        self.window.close()
+        self.window.deleteLater()
+        self.app.processEvents()
+        self.temp_dir.cleanup()
+
+    def test_family_is_default_and_other_pages_are_lazy(self) -> None:
+        self.assertEqual(self.window._current_page, PAGE_FAMILY)
+        self.assertEqual(set(self.window._pages), {PAGE_FAMILY})
+        self.assertEqual(self.window.page_stack.count(), PAGE_COUNT)
+        family = self.window._pages[PAGE_FAMILY]
+        self.assertIsInstance(family, FamilyPage)
+        self.assertGreater(family.model.rowCount(), 0)
+
+    def test_all_pages_can_be_created_on_demand(self) -> None:
+        for index in (PAGE_RANDOM, PAGE_ELEMENT, PAGE_SHINY, PAGE_SETTINGS):
+            self.window._set_page(index)
+            self.app.processEvents()
+            self.assertIn(index, self.window._pages)
+            self.assertEqual(self.window.page_stack.currentIndex(), index)
+        self.assertEqual(len(self.window._pages), PAGE_COUNT)
+
+    def test_family_operation_updates_model_and_activity_without_rebuild(self) -> None:
+        page = self.window._pages[PAGE_FAMILY]
+        page_id = id(page)
+        with patch("src.qt_ui_v2.main_window.beep"):
+            self.window._family_increase(self.family_name)
+
+        self.assertEqual(self.save_service.current.family_pool[self.family_name], 1)
+        self.assertEqual(page.model.item(page.model.find_row(self.family_name))["count"], 1)
+        self.assertEqual(self.window.activity_drawer.source_model.rowCount(), 1)
+        self.assertEqual(id(self.window._pages[PAGE_FAMILY]), page_id)
+
+    def test_element_page_uses_all_elements_and_updates_incrementally(self) -> None:
+        self.window._set_page(PAGE_ELEMENT)
+        self.app.processEvents()
+        page = self.window._pages[PAGE_ELEMENT]
+        self.assertEqual(set(page._buttons), set(ELEMENTS))
+        element = ELEMENTS[0]
+        page.select_element(element)
+        with patch("src.qt_ui_v2.main_window.beep"):
+            self.window._element_increase(element)
+        self.assertIn("保底 1", page._buttons[element].text())
+
+    def test_activity_drawer_is_hidden_by_default_and_toggleable(self) -> None:
+        self.assertFalse(self.window.activity_drawer.isVisible())
+        self.window._set_activity_visible(True)
+        self.app.processEvents()
+        self.assertTrue(self.window.activity_drawer.isVisible())
+        self.assertTrue(self.window.activity_btn.isChecked())
+
+    def test_ui_state_preserves_family_selection_shape(self) -> None:
+        self.window._persist_ui_state()
+        state = self.settings.ui_state()
+        self.assertIn("a", state["family_selections"])
+        self.assertIn("season", state["family_selections"]["a"])
+
+    def test_family_remains_start_page_after_visiting_settings(self) -> None:
+        self.window._set_page(PAGE_SETTINGS)
+        self.window._persist_ui_state()
+        self.window.close()
+        restored = QtMainWindowV2(self.save_service, self.settings)
+        try:
+            self.assertEqual(restored._current_page, PAGE_FAMILY)
+            self.assertEqual(set(restored._pages), {PAGE_FAMILY})
+        finally:
+            restored.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

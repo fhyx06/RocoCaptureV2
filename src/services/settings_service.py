@@ -33,6 +33,9 @@ DEFAULT_LOG_COLORS = {
 DEFAULT_SETTINGS = {
     "theme": THEME_DARK,
     "log_colors": DEFAULT_LOG_COLORS,
+    "ui_state": {
+        "family_selections": {},
+    },
 }
 
 
@@ -67,6 +70,14 @@ class SettingsService:
             return self._merge_log_palette(DEFAULT_LOG_COLORS[theme_name], all_colors)
         theme_colors = all_colors.get(theme_name, {}) if isinstance(all_colors, dict) else {}
         return self._merge_log_palette(DEFAULT_LOG_COLORS[theme_name], theme_colors)
+
+    def ui_state(self) -> dict[str, Any]:
+        state = self._settings.get("ui_state", {})
+        return copy.deepcopy(state) if isinstance(state, dict) else {}
+
+    def set_ui_state(self, state: dict[str, Any]) -> None:
+        self._settings["ui_state"] = copy.deepcopy(state)
+        self.save()
 
     def save(self) -> None:
         with open(self.settings_path, "w", encoding="utf-8") as f:
@@ -104,6 +115,16 @@ class SettingsService:
                     log_colors.get(theme_name, {}),
                 )
                 for theme_name in (THEME_DARK, THEME_LIGHT)
+            }
+        ui_state = data.get("ui_state", {})
+        if isinstance(ui_state, dict):
+            family_selections = ui_state.get("family_selections", {})
+            settings["ui_state"] = {
+                "family_selections": (
+                    copy.deepcopy(family_selections)
+                    if isinstance(family_selections, dict)
+                    else {}
+                ),
             }
         return settings
 
