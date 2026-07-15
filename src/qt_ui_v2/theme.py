@@ -110,7 +110,7 @@ QWidget#topBar, QWidget#sidebar {{
 QWidget#pageHost {{
     background: {c['window']};
 }}
-QFrame#card, QWidget#card, QFrame#detailCard, QFrame#filterBar {{
+QFrame#card, QWidget#card, QFrame#detailCard, QFrame#filterBar, QFrame#emptyState {{
     background: {c['surface']};
     border: 1px solid {c['border']};
     border-radius: 12px;
@@ -128,6 +128,8 @@ QLabel#version {{ color: {c['muted']}; font-size: 9pt; }}
 QLabel#pageTitle {{ color: {c['text']}; font-size: 17pt; font-weight: 600; }}
 QLabel#pageSubtitle, QLabel#muted, QLabel#detailMeta {{ color: {c['muted']}; }}
 QLabel#detailTitle {{ color: {c['text']}; font-size: 14pt; font-weight: 600; }}
+QLabel#emptyIcon {{ color: {c['warning']}; font-size: 28pt; }}
+QLabel#emptyTitle {{ color: {c['text']}; font-size: 13pt; font-weight: 600; }}
 QLabel#countValue {{ color: {c['text']}; font-size: 36pt; font-weight: 600; }}
 QLabel#countValue[state="warn"] {{ color: {c['warning']}; }}
 QLabel#countValue[state="critical"] {{ color: {c['critical']}; }}
@@ -235,6 +237,11 @@ QListView, QTableView {{
     selection-background-color: {c['accent_soft']};
     selection-color: {c['text']};
 }}
+QTableView#shinyGallery {{
+    background: {c['window']};
+    border: none;
+}}
+QStackedWidget#shinyStack {{ background: transparent; }}
 QTableView {{ gridline-color: {c['border']}; }}
 QHeaderView::section {{
     background: {c['surface_alt']};

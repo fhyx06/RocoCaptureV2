@@ -14,6 +14,7 @@ SPIRIT_ELEMENTS_ROLE = Qt.ItemDataRole.UserRole + 3
 SPIRIT_SEASON_ROLE = Qt.ItemDataRole.UserRole + 4
 LOG_POOL_ROLE = Qt.ItemDataRole.UserRole + 10
 SHINY_INDEX_ROLE = Qt.ItemDataRole.UserRole + 20
+SHINY_RECORD_ROLE = Qt.ItemDataRole.UserRole + 21
 
 
 class SpiritListModel(QAbstractListModel):
@@ -70,8 +71,7 @@ class SpiritListModel(QAbstractListModel):
         self.dataChanged.emit(index, index, [SPIRIT_COUNT_ROLE, Qt.ItemDataRole.ToolTipRole])
 
 
-class ShinyTableModel(QAbstractTableModel):
-    HEADERS = ["时间", "池子", "赛季", "精灵", "属性", "保底"]
+class ShinyGridModel(QAbstractTableModel):
     POOL_LABELS = {
         POOL_FAMILY: "家族池",
         POOL_RANDOM: "随机池",
@@ -81,37 +81,39 @@ class ShinyTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows: list[tuple[int, ShinyRecord]] = []
+        self._columns = 2
 
     def rowCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self._rows)
+        if parent.isValid() or not self._rows:
+            return 0
+        return (len(self._rows) + self._columns - 1) // self._columns
 
     def columnCount(self, parent=QModelIndex()) -> int:
-        return len(self.HEADERS)
-
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
-        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            return self.HEADERS[section]
-        return None
+        return 0 if parent.isValid() else self._columns
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
-        if not index.isValid() or not 0 <= index.row() < len(self._rows):
+        flat_index = index.row() * self._columns + index.column()
+        if not index.isValid() or not 0 <= flat_index < len(self._rows):
             return None
-        source_index, record = self._rows[index.row()]
+        source_index, record = self._rows[flat_index]
         if role == SHINY_INDEX_ROLE:
             return source_index
-        if role == Qt.ItemDataRole.TextAlignmentRole and index.column() == 5:
-            return Qt.AlignmentFlag.AlignCenter
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
-        values = [
-            record.timestamp[5:16] if len(record.timestamp) >= 16 else record.timestamp,
-            self.POOL_LABELS.get(record.pool_type, "其他"),
-            record.season or "—",
-            record.spirit_name or "未知精灵",
-            record.element or "—",
-            str(record.pity_count),
-        ]
-        return values[index.column()]
+        if role == SHINY_RECORD_ROLE:
+            return record
+        if role == Qt.ItemDataRole.DisplayRole:
+            return record.spirit_name or "未知精灵"
+        if role == Qt.ItemDataRole.DecorationRole:
+            return spirit_icon(record.spirit_name, record.season)
+        if role == Qt.ItemDataRole.ToolTipRole:
+            pool = self.POOL_LABELS.get(record.pool_type, "其他")
+            return f"{record.spirit_name or '未知精灵'} · {pool} · 保底 {record.pity_count}"
+        return None
+
+    def flags(self, index: QModelIndex) -> Qt.ItemFlag:
+        flat_index = index.row() * self._columns + index.column()
+        if not index.isValid() or not 0 <= flat_index < len(self._rows):
+            return Qt.ItemFlag.NoItemFlags
+        return super().flags(index)
 
     def set_records(self, records: list[ShinyRecord], season: str = "", pool_type: str = "") -> None:
         rows: list[tuple[int, ShinyRecord]] = []
@@ -125,6 +127,17 @@ class ShinyTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()
+
+    def set_columns(self, columns: int) -> None:
+        columns = max(1, min(2, int(columns)))
+        if columns == self._columns:
+            return
+        self.beginResetModel()
+        self._columns = columns
+        self.endResetModel()
+
+    def record_count(self) -> int:
+        return len(self._rows)
 
 
 class ActivityLogModel(QAbstractListModel):

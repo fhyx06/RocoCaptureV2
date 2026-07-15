@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from src.models.constants import ELEMENTS
+from src.models.constants import ELEMENTS, POOL_FAMILY, POOL_RANDOM
 from src.qt_ui_v2.main_window import (
     PAGE_COUNT,
     PAGE_ELEMENT,
@@ -21,6 +21,8 @@ from src.qt_ui_v2.main_window import (
     QtMainWindowV2,
 )
 from src.qt_ui_v2.pages.family_page import FamilyPage
+from src.qt_ui_v2.pages.shiny_page import ShinyPage
+from src.qt_ui_v2.models import SHINY_INDEX_ROLE, SHINY_RECORD_ROLE
 from src.qt_ui_v2.theme import apply_theme, configure_font
 from src.services.save_service import SaveService
 from src.services.settings_service import SettingsService
@@ -76,6 +78,14 @@ class UiV2Tests(unittest.TestCase):
         self.assertEqual(self.window.activity_drawer.source_model.rowCount(), 1)
         self.assertEqual(id(self.window._pages[PAGE_FAMILY]), page_id)
 
+    def test_family_detail_uses_large_hero_art(self) -> None:
+        page = self.window._pages[PAGE_FAMILY]
+        pixmap = page.detail_icon.pixmap()
+        self.assertIsNotNone(pixmap)
+        self.assertGreaterEqual(page.detail_icon.minimumHeight(), 180)
+        self.assertGreaterEqual(pixmap.width(), 150)
+        self.assertGreaterEqual(pixmap.height(), 150)
+
     def test_element_page_uses_all_elements_and_updates_incrementally(self) -> None:
         self.window._set_page(PAGE_ELEMENT)
         self.app.processEvents()
@@ -93,6 +103,48 @@ class UiV2Tests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(self.window.activity_drawer.isVisible())
         self.assertTrue(self.window.activity_btn.isChecked())
+
+    def test_shiny_records_use_responsive_cards_and_filters(self) -> None:
+        slot = self.save_service.current
+        self.assertIsNotNone(slot)
+        slot.add_shiny_record(
+            POOL_FAMILY,
+            self.family_name,
+            42,
+            season="S1",
+            element="火",
+            reset_after_record=False,
+        )
+        slot.add_shiny_record(
+            POOL_RANDOM,
+            self.family_name,
+            7,
+            season="S2",
+            reset_after_record=False,
+        )
+        self.window._set_page(PAGE_SHINY)
+        self.app.processEvents()
+        page = self.window._pages[PAGE_SHINY]
+        self.assertIsInstance(page, ShinyPage)
+        self.assertEqual(page.model.record_count(), 2)
+        self.assertEqual(page.record_stack.currentWidget(), page.gallery)
+        self.assertIsNotNone(page.model.index(0, 0).data(SHINY_RECORD_ROLE))
+        self.assertEqual(page._columns, 2)
+
+        page.gallery.setCurrentIndex(page.model.index(0, 1))
+        self.app.processEvents()
+        self.assertTrue(page.delete_btn.isEnabled())
+        self.assertEqual(page.model.index(0, 1).data(SHINY_INDEX_ROLE), 0)
+
+        page.gallery.setFixedWidth(650)
+        self.app.processEvents()
+        page._relayout()
+        self.assertEqual(page._columns, 1)
+
+        page.pool_combo.setCurrentIndex(page.pool_combo.findData(POOL_FAMILY))
+        self.app.processEvents()
+        self.assertEqual(page.model.record_count(), 1)
+        self.assertEqual(page.result_summary.text(), "1 条记录")
 
     def test_ui_state_preserves_family_selection_shape(self) -> None:
         self.window._persist_ui_state()

@@ -107,8 +107,8 @@ class FamilyPage(QWidget):
 
         detail = QFrame()
         detail.setObjectName("detailCard")
-        detail.setMinimumWidth(270)
-        detail.setMaximumWidth(340)
+        detail.setMinimumWidth(300)
+        detail.setMaximumWidth(370)
         detail_layout = QVBoxLayout(detail)
         detail_layout.setContentsMargins(22, 22, 22, 22)
         detail_layout.setSpacing(12)
@@ -130,12 +130,12 @@ class FamilyPage(QWidget):
             self.element_row.addWidget(badge)
         self.element_row.addStretch()
         detail_layout.addLayout(self.element_row)
-        detail_layout.addStretch()
 
         self.detail_icon = QLabel()
-        self.detail_icon.setFixedHeight(96)
+        self.detail_icon.setObjectName("spiritHero")
+        self.detail_icon.setMinimumHeight(180)
         self.detail_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        detail_layout.addWidget(self.detail_icon)
+        detail_layout.addWidget(self.detail_icon, 1)
 
         self.count_label = QLabel("0")
         self.count_label.setObjectName("countValue")
@@ -170,7 +170,7 @@ class FamilyPage(QWidget):
         splitter.addWidget(detail)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
-        splitter.setSizes([640, 300])
+        splitter.setSizes([620, 340])
         layout.addWidget(splitter, 1)
         self._set_actions_enabled(False)
 
@@ -274,7 +274,7 @@ class FamilyPage(QWidget):
         number, _, name = str(item["display"]).partition(" ")
         self.detail_title.setText(name or item["display"])
         self.detail_number.setText(f"{number}  ·  {item['season']}")
-        self.detail_icon.setPixmap(spirit_icon(item["display"], item["season"]).pixmap(88, 88))
+        self.detail_icon.setPixmap(spirit_icon(item["display"], item["season"]).pixmap(160, 160))
         elements = item.get("elements", [])
         for index, badge in enumerate(self.element_badges):
             if index < len(elements):
