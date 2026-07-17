@@ -10,6 +10,9 @@ class SettingsPage(QWidget):
     theme_toggle_requested = Signal()
     update_check_requested = Signal()
     github_requested = Signal()
+    content_import_requested = Signal()
+    content_open_requested = Signal()
+    content_rollback_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -43,6 +46,31 @@ class SettingsPage(QWidget):
         appearance_layout.addWidget(self.theme_btn)
         layout.addWidget(appearance)
 
+        content = QFrame()
+        content.setObjectName("detailCard")
+        content_layout = QHBoxLayout(content)
+        content_layout.setContentsMargins(20, 18, 20, 18)
+        content_text = QVBoxLayout()
+        content_heading = QLabel("赛季资源")
+        content_heading.setObjectName("detailTitle")
+        self.content_status = QLabel("仅使用应用内置资源")
+        self.content_status.setObjectName("detailMeta")
+        self.content_status.setWordWrap(True)
+        content_text.addWidget(content_heading)
+        content_text.addWidget(self.content_status)
+        content_layout.addLayout(content_text, 1)
+        self.content_open_btn = QPushButton("打开目录")
+        self.content_rollback_btn = QPushButton("回滚")
+        self.content_import_btn = QPushButton("导入资源包")
+        self.content_import_btn.setProperty("role", "primary")
+        self.content_open_btn.clicked.connect(self.content_open_requested.emit)
+        self.content_rollback_btn.clicked.connect(self.content_rollback_requested.emit)
+        self.content_import_btn.clicked.connect(self.content_import_requested.emit)
+        content_layout.addWidget(self.content_open_btn)
+        content_layout.addWidget(self.content_rollback_btn)
+        content_layout.addWidget(self.content_import_btn)
+        layout.addWidget(content)
+
         about = QFrame()
         about.setObjectName("detailCard")
         about_layout = QHBoxLayout(about)
@@ -72,3 +100,9 @@ class SettingsPage(QWidget):
     def set_update_checking(self, checking: bool) -> None:
         self.update_btn.setEnabled(not checking)
         self.update_btn.setText("检查中…" if checking else "检查更新")
+
+    def set_content_state(self, summary: str, can_rollback: bool, available: bool = True) -> None:
+        self.content_status.setText(summary)
+        self.content_import_btn.setEnabled(available)
+        self.content_open_btn.setEnabled(available)
+        self.content_rollback_btn.setEnabled(available and can_rollback)

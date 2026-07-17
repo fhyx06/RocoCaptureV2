@@ -21,7 +21,7 @@ from src.models.constants import PITY_MAX, PITY_WARN_THRESHOLD
 from src.models.save_slot import SaveSlot
 from src.qt_ui_v2.delegates import SpiritItemDelegate
 from src.qt_ui_v2.models import SPIRIT_DATA_ROLE, SpiritListModel
-from src.qt_ui_v2.resources import spirit_display, spirit_icon
+from src.qt_ui_v2.resources import element_icon, spirit_display, spirit_icon
 from src.qt_ui_v2.theme import repolish
 
 
@@ -124,7 +124,9 @@ class FamilyPage(QWidget):
         self.element_badges: list[QLabel] = []
         for _ in range(2):
             badge = QLabel()
-            badge.setObjectName("badge")
+            badge.setObjectName("elementIcon")
+            badge.setFixedSize(44, 44)
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.hide()
             self.element_badges.append(badge)
             self.element_row.addWidget(badge)
@@ -278,9 +280,15 @@ class FamilyPage(QWidget):
         elements = item.get("elements", [])
         for index, badge in enumerate(self.element_badges):
             if index < len(elements):
-                badge.setText(str(elements[index]))
+                element = str(elements[index])
+                badge.setPixmap(element_icon(element).pixmap(44, 44))
+                badge.setToolTip(f"{element}属性")
+                badge.setAccessibleName(f"{element}属性")
                 badge.show()
             else:
+                badge.clear()
+                badge.setToolTip("")
+                badge.setAccessibleName("")
                 badge.hide()
         self._set_count(int(item.get("count", 0)))
 

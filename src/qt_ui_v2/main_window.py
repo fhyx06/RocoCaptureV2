@@ -45,6 +45,7 @@ from src.qt_ui_v2.pages.shiny_page import ShinyPage
 from src.qt_ui_v2.resources import ICONS_DIR, app_icon, is_newer_version
 from src.qt_ui_v2.theme import apply_theme
 from src.services.save_service import SaveService
+from src.services.content_pack_service import ContentPackError, ContentPackService
 from src.services.settings_service import THEME_DARK, SettingsService
 from src.utils.beep import beep
 
@@ -58,10 +59,16 @@ PAGE_COUNT = 5
 
 
 class QtMainWindowV2(QMainWindow):
-    def __init__(self, save_service: SaveService, settings_service: SettingsService):
+    def __init__(
+        self,
+        save_service: SaveService,
+        settings_service: SettingsService,
+        content_pack_service: ContentPackService | None = None,
+    ):
         super().__init__()
         self._save_svc = save_service
         self._settings_svc = settings_service
+        self._content_svc = content_pack_service
         self._ui_state = settings_service.ui_state()
         self._family_selections = dict(self._ui_state.get("family_selections", {}))
         self._pages: dict[int, QWidget] = {}
@@ -282,7 +289,11 @@ class QtMainWindowV2(QMainWindow):
         page.theme_toggle_requested.connect(self._toggle_theme)
         page.update_check_requested.connect(self._check_for_updates)
         page.github_requested.connect(lambda: QDesktopServices.openUrl(QUrl(GITHUB_PROJECT_URL)))
+        page.content_import_requested.connect(self._import_content_pack)
+        page.content_open_requested.connect(self._open_content_directory)
+        page.content_rollback_requested.connect(self._rollback_content_pack)
         page.set_theme_name(self._settings_svc.theme)
+        self._update_content_controls(page)
         return page
 
     def _refresh_page(self, index: int, slot: SaveSlot) -> None:
@@ -641,6 +652,68 @@ class QtMainWindowV2(QMainWindow):
         page = self._pages.get(PAGE_SETTINGS)
         if isinstance(page, SettingsPage):
             page.set_theme_name(self._settings_svc.theme)
+
+    def _update_content_controls(self, page: SettingsPage | None = None) -> None:
+        target = page or self._pages.get(PAGE_SETTINGS)
+        if not isinstance(target, SettingsPage):
+            return
+        if self._content_svc is None:
+            target.set_content_state("当前运行环境未配置本地资源目录。", False, False)
+            return
+        target.set_content_state(
+            self._content_svc.summary(),
+            self._content_svc.can_rollback(),
+        )
+
+    def _import_content_pack(self) -> None:
+        if self._content_svc is None:
+            return
+        archive_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "导入赛季资源包",
+            str(Path.home()),
+            "赛季资源包 (*.zip)",
+        )
+        if not archive_path:
+            return
+        try:
+            result = self._content_svc.install_pack(archive_path)
+        except (ContentPackError, OSError) as exc:
+            QMessageBox.critical(self, "资源包导入失败", str(exc))
+            return
+        self._update_content_controls()
+        if result.activated:
+            message = (
+                f"已安装并启用 {result.season} v{result.pack_version}。\n\n"
+                "资源将在下次启动时完整生效。"
+            )
+        else:
+            message = f"{result.season} v{result.pack_version} 已安装且当前正在使用。"
+        QMessageBox.information(self, "资源包导入完成", message)
+
+    def _open_content_directory(self) -> None:
+        if self._content_svc is None:
+            return
+        directory = self._content_svc.ensure_content_root()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
+
+    def _rollback_content_pack(self) -> None:
+        if self._content_svc is None or not self._content_svc.can_rollback():
+            return
+        if not self._confirm("确定回滚到上一次资源配置吗？"):
+            return
+        try:
+            result = self._content_svc.rollback()
+        except (ContentPackError, OSError) as exc:
+            QMessageBox.critical(self, "资源回滚失败", str(exc))
+            return
+        self._update_content_controls()
+        active = "、".join(result.active_seasons) if result.active_seasons else "仅内置资源"
+        QMessageBox.information(
+            self,
+            "资源回滚完成",
+            f"已恢复为：{active}\n\n资源将在下次启动时完整生效。",
+        )
 
     def _network_api(self):
         if self._network_module is None:

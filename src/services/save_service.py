@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-import os
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -49,10 +49,7 @@ class SaveService:
             raise FileExistsError(f"存档 '{name}' 已存在")
         slot = SaveSlot(name)
         # 首次新建存档：预填所有赛季的全部异色精灵（格式：No.041 奇丽草）
-        for season_data in load_seasons():
-            for spirit in season_data.get("spirits", []):
-                display_name = f"No.{spirit['no']:03d} {spirit['name']}"
-                slot.family_pool[display_name] = 0
+        self._sync_family_pool(slot)
         self._write_json(path, slot.to_dict())
         self._current = slot
         self._current_path = path
@@ -67,12 +64,8 @@ class SaveService:
             raise FileNotFoundError(f"存档 '{name}' 不存在")
         data = self._read_json(path)
         slot = SaveSlot.from_dict(data)
-        # 兼容旧存档：补充存档创建后新增的赛季精灵（计数为 0）
-        for season_data in load_seasons():
-            for spirit in season_data.get("spirits", []):
-                display_name = f"No.{spirit['no']:03d} {spirit['name']}"
-                if display_name not in slot.family_pool:
-                    slot.family_pool[display_name] = 0
+        # 兼容旧存档：补充新增精灵，并按编号迁移资源包中的名称修正。
+        self._sync_family_pool(slot)
         self._current = slot
         self._current_path = path
         return slot
@@ -126,12 +119,7 @@ class SaveService:
             raise FileNotFoundError(f"文件 '{file_path}' 不存在")
         data = self._read_json(file_path)
         slot = SaveSlot.from_dict(data)
-        # 补充新赛季精灵
-        for season_data in load_seasons():
-            for spirit in season_data.get("spirits", []):
-                display_name = f"No.{spirit['no']:03d} {spirit['name']}"
-                if display_name not in slot.family_pool:
-                    slot.family_pool[display_name] = 0
+        self._sync_family_pool(slot)
         name = slot.name.strip()
         if not name:
             name = file_path.stem
@@ -164,6 +152,26 @@ class SaveService:
 
     def _save_path(self, name: str) -> Path:
         return self.saves_dir / f"{name}.json"
+
+    @staticmethod
+    def _sync_family_pool(slot: SaveSlot) -> None:
+        desired_by_number: dict[int, str] = {}
+        for season_data in load_seasons():
+            for spirit in season_data.get("spirits", []):
+                number = int(spirit["no"])
+                desired_by_number[number] = f"No.{number:03d} {spirit['name']}"
+
+        for number, desired_name in desired_by_number.items():
+            count = int(slot.family_pool.get(desired_name, 0))
+            aliases = []
+            for existing_name, existing_count in slot.family_pool.items():
+                match = re.match(r"^No\.(\d+)\s+", existing_name, flags=re.IGNORECASE)
+                if match and int(match.group(1)) == number and existing_name != desired_name:
+                    count = max(count, int(existing_count))
+                    aliases.append(existing_name)
+            for alias in aliases:
+                slot.family_pool.pop(alias, None)
+            slot.family_pool[desired_name] = count
 
     @staticmethod
     def _read_json(path: Path) -> dict:

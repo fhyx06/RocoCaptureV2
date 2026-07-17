@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from src.content.repository import BUILTIN_CONTENT_ROOT, ContentRepository
 from src.models.constants import ELEMENTS, POOL_FAMILY, POOL_RANDOM
 from src.qt_ui_v2.main_window import (
     PAGE_COUNT,
@@ -25,6 +26,7 @@ from src.qt_ui_v2.pages.shiny_page import ShinyPage
 from src.qt_ui_v2.models import SHINY_INDEX_ROLE, SHINY_RECORD_ROLE
 from src.qt_ui_v2.theme import apply_theme, configure_font
 from src.services.save_service import SaveService
+from src.services.content_pack_service import ContentPackService
 from src.services.settings_service import SettingsService
 
 
@@ -40,8 +42,16 @@ class UiV2Tests(unittest.TestCase):
         self.slot = self.save_service.create_save("a")
         self.family_name = next(iter(self.slot.family_pool))
         self.settings = SettingsService(os.path.join(self.temp_dir.name, "settings.json"))
+        self.content_repository = ContentRepository(
+            BUILTIN_CONTENT_ROOT,
+            os.path.join(self.temp_dir.name, "content"),
+        )
+        self.content_service = ContentPackService(
+            self.content_repository,
+            os.path.join(self.temp_dir.name, "content"),
+        )
         apply_theme(self.app, self.settings.theme)
-        self.window = QtMainWindowV2(self.save_service, self.settings)
+        self.window = QtMainWindowV2(self.save_service, self.settings, self.content_service)
         self.window.show()
         self.app.processEvents()
 
@@ -85,6 +95,19 @@ class UiV2Tests(unittest.TestCase):
         self.assertGreaterEqual(page.detail_icon.minimumHeight(), 180)
         self.assertGreaterEqual(pixmap.width(), 150)
         self.assertGreaterEqual(pixmap.height(), 150)
+
+    def test_family_detail_uses_element_icons_instead_of_text_badges(self) -> None:
+        page = self.window._pages[PAGE_FAMILY]
+        item = page._selected_item()
+        self.assertIsNotNone(item)
+        elements = item["elements"]
+
+        for index, element in enumerate(elements):
+            badge = page.element_badges[index]
+            self.assertEqual(badge.text(), "")
+            self.assertIsNotNone(badge.pixmap())
+            self.assertFalse(badge.pixmap().isNull())
+            self.assertEqual(badge.toolTip(), f"{element}属性")
 
     def test_element_page_uses_all_elements_and_updates_incrementally(self) -> None:
         self.window._set_page(PAGE_ELEMENT)
@@ -152,11 +175,20 @@ class UiV2Tests(unittest.TestCase):
         self.assertIn("a", state["family_selections"])
         self.assertIn("season", state["family_selections"]["a"])
 
+    def test_settings_exposes_local_content_pack_controls(self) -> None:
+        self.window._set_page(PAGE_SETTINGS)
+        self.app.processEvents()
+        page = self.window._pages[PAGE_SETTINGS]
+        self.assertIn("内置资源", page.content_status.text())
+        self.assertTrue(page.content_import_btn.isEnabled())
+        self.assertTrue(page.content_open_btn.isEnabled())
+        self.assertFalse(page.content_rollback_btn.isEnabled())
+
     def test_family_remains_start_page_after_visiting_settings(self) -> None:
         self.window._set_page(PAGE_SETTINGS)
         self.window._persist_ui_state()
         self.window.close()
-        restored = QtMainWindowV2(self.save_service, self.settings)
+        restored = QtMainWindowV2(self.save_service, self.settings, self.content_service)
         try:
             self.assertEqual(restored._current_page, PAGE_FAMILY)
             self.assertEqual(set(restored._pages), {PAGE_FAMILY})

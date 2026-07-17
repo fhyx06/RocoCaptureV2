@@ -20,12 +20,13 @@
 | **多存档管理** | 支持新建 / 切换 / 重命名 / 删除 / 导入 / 导出存档 |
 | **检查更新** | 通过国内版本清单检查最新版本，并跳转 GitHub Releases 下载页面 |
 | **实时持久化** | 每次操作后自动写入 JSON |
+| **赛季资源包** | 支持独立导入、版本覆盖与一键回滚，无需每赛季重装程序 |
 
 ---
 
 ## 快速开始
 
-**提示：如果您下载的是 Releases 页面已打包的程序**，无需安装 Python 环境和依赖。直接解压下载的压缩包，双击运行目录下的 `RocoCapture-x.x.x-Win-x64.exe` 即可启动。启动后会在程序位置创建 `saves` 文件夹，用于保存存档。
+**提示：如果您下载的是 Releases 页面已打包的程序**，无需安装 Python 环境和依赖。完整解压 portable 压缩包后，双击目录下的 `RocoCaptureV2-vx.x.x.exe` 即可启动。v0.3.2 portable 已预装 S3 v1 资源，首次启动即可使用 S1、S2、S3；程序会在当前目录维护 `saves` 与 `data/content`。
 
 ### 环境要求
 
@@ -63,8 +64,12 @@ RocoCaptureV2/
 ├── pyproject.toml                     # 项目元数据与依赖声明
 ├── requirements.txt                   # 依赖声明
 ├── RocoCaptureV2.spec                 # PyInstaller 打包配置
+├── content_sources/
+│   └── S3/                            # S3 资源包源数据与精灵 PNG
 ├── scripts/
-│   └── build_release.ps1              # Windows portable 发布包构建脚本
+│   ├── build_content_pack.py           # 生成并校验独立赛季资源包
+│   └── build_release.ps1               # Windows portable 发布包构建脚本
+├── data/content/                       # 已安装的本地赛季资源（运行时生成）
 ├── saves/                             # 存档目录（运行时自动生成）
 │   └── <存档名>.json
 └── src/
@@ -77,7 +82,10 @@ RocoCaptureV2/
     │   └── save_slot.py               # 核心数据模型（三池 + 日志 + 异色记录）
     ├── services/
     │   ├── __init__.py
-    │   └── save_service.py            # 存档读写服务
+    │   ├── content_pack_service.py     # 资源包校验、安装与回滚
+    │   └── save_service.py             # 存档读写服务
+    ├── content/
+    │   └── repository.py               # 内置资源与本地资源包合并层
     ├── assets/
     │   ├── __init__.py
     │   ├── season_loader.py           # 赛季配置读取工具
@@ -85,9 +93,10 @@ RocoCaptureV2/
     │   ├── seasons/                   # 赛季 JSON 配置
     │   ├── sounds/                    # 音效文件
     │   └── spirits/                   # 异色精灵图
-    ├── qt_ui/
-    │   ├── main_window.py             # Qt 主窗口
-    │   └── theme.py                   # Qt 全局样式
+    ├── qt_ui_v2/
+    │   ├── main_window.py              # Qt V2 主窗口
+    │   ├── pages/                      # 家族池、随机池、属性池等页面
+    │   └── theme.py                    # Qt 全局样式
     └── utils/
         ├── __init__.py
         └── beep.py                   # 音效播放工具
@@ -115,10 +124,10 @@ RocoCaptureV2/
 
 ### 家族池
 
-1. 展开赛季列表并选择需要追踪的精灵。
+1. 选择赛季标签，并从左侧列表选择需要追踪的精灵。
 2. 使用右侧的增 / 减 / 重置 / 出异色按钮操作当前选中精灵。
 3. 获得异色后会记录当前精灵、赛季与保底数，并清空该精灵的家族池保底。
-4. 精灵属性会显示在列表中，计数彼此独立。
+4. 详情卡会显示精灵图片与属性图标，各精灵计数彼此独立。
 
 ### 属性池
 
@@ -140,6 +149,12 @@ RocoCaptureV2/
 | 0 – 69 | 白色 | 正常 |
 | 70 – 79 | 🟠 橙色 | 接近保底，注意 |
 | 80 | 🔴 红色 | 已达保底上限 |
+
+### 赛季资源包
+
+程序内置 S1、S2 作为离线基础资源，并支持从“设置 → 赛季资源”手动导入独立 ZIP。官方 v0.3.2 portable 已将 S3 v1 作为本地资源包预安装；资源包可以新增赛季，或用更高版本覆盖已有赛季。旧存档会在下次启动时自动补充新精灵，已有保底计数不会丢失。
+
+本地资源保存在 `data/content/`。导入时会检查目录安全、版本兼容性、图片格式和逐文件 SHA-256；验证失败不会替换当前资源，并可从设置页回滚上一次资源配置。资源包制作与格式说明见 [赛季资源包文档](docs/content-packs.md)。
 
 ---
 
@@ -218,7 +233,10 @@ RocoCaptureV2/
 ```text
 release/RocoCaptureV2-v<version>-win-x64-portable.zip
 release/latest.json
+release/content/S3-v1.zip
 ```
+
+portable 成品中的 `data/content` 已预安装 S3 v1，用户无需再次导入；`release/content/S3-v1.zip` 用于向已有 v0.3.2 用户单独分发资源。
 
 ---
 
@@ -230,6 +248,10 @@ release/latest.json
 - **优化** 启动与刷新机制，页面按需创建并使用增量更新
 - **优化** Windows 中文字体与高 DPI 显示，统一深色、浅色主题视觉
 - **优化** 家族池精灵主视觉，异色记录改为响应式收藏卡片布局
+- **新增** 赛季资源包系统，支持安全校验、版本覆盖、存档补充与一键回滚
+- **新增** S3 v1 赛季数据与 18 张精灵图片，portable 成品首次启动即可使用
+- **优化** 家族池详情以清晰的属性图标替代文字标签
+- **修复** Windows 短暂占用资源目录时导入失败或启动崩溃的问题
 
 ### v0.3.1
 

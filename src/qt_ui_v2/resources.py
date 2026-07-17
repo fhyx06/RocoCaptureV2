@@ -7,11 +7,12 @@ from pathlib import Path
 
 from PySide6.QtGui import QIcon
 
+from src.content.repository import get_content_repository
+
 
 ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
 ICONS_DIR = ASSETS_DIR / "icons"
 V2_ICONS_DIR = ICONS_DIR / "v2"
-SPIRITS_DIR = ASSETS_DIR / "spirits"
 
 
 def spirit_display(spirit: dict) -> str:
@@ -43,14 +44,11 @@ def element_icon(element: str) -> QIcon:
 def _spirit_icon_index() -> tuple[dict[tuple[str, str], Path], dict[str, Path]]:
     by_season: dict[tuple[str, str], Path] = {}
     fallback: dict[str, Path] = {}
-    if not SPIRITS_DIR.is_dir():
-        return by_season, fallback
-    for path in SPIRITS_DIR.rglob("*.png"):
-        season = path.parent.name if path.parent != SPIRITS_DIR else ""
+    for season, path in get_content_repository().spirit_files():
         name = _normalize_spirit_name(path.stem)
         if name:
             by_season[(season, name)] = path
-            fallback.setdefault(name, path)
+            fallback[name] = path
     return by_season, fallback
 
 
@@ -61,6 +59,11 @@ def spirit_icon(spirit_name: str, season: str = "") -> QIcon:
     path = by_season.get((season, lookup)) if season else None
     path = path or fallback.get(lookup)
     return QIcon(str(path)) if path else QIcon()
+
+
+def clear_content_icon_caches() -> None:
+    _spirit_icon_index.cache_clear()
+    spirit_icon.cache_clear()
 
 
 def version_tuple(version: str) -> tuple[int, int, int] | None:

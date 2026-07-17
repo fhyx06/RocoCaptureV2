@@ -6,6 +6,7 @@ __pycache__/
 dist/
 build/
 release/
+/S3-v*.zip
 *.spec
 !RocoCaptureV2.spec
 icon.ico
@@ -16,6 +17,7 @@ venv/
 
 # User data
 saves/
+data/
 
 # WorkBuddy
 .workbuddy/
@@ -24,4 +26,6 @@ saves/
 .vscode/
 .idea/
 
-scripts/
+scripts/*
+!scripts/build_release.ps1
+!scripts/build_content_pack.py

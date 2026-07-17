@@ -1,36 +1,12 @@
 """赛季配置读取工具。"""
 from __future__ import annotations
 
-import json
-import re
-from functools import lru_cache
-from pathlib import Path
+from src.content.repository import get_content_repository
 
 
-_SEASONS_DIR = Path(__file__).resolve().parent / "seasons"
-
-
-def _season_sort_key(season_data: dict) -> tuple[int, str]:
-    season_id = str(season_data.get("season", ""))
-    match = re.search(r"\d+", season_id)
-    number = int(match.group()) if match else -1
-    return number, season_id
-
-
-@lru_cache(maxsize=1)
 def load_seasons() -> list[dict]:
-    """扫描 seasons 目录，返回按赛季编号排序的赛季数据。"""
-    if not _SEASONS_DIR.exists():
-        return []
-
-    seasons: list[dict] = []
-    for path in sorted(_SEASONS_DIR.glob("*.json")):
-        try:
-            with open(path, encoding="utf-8") as fp:
-                seasons.append(json.load(fp))
-        except (json.JSONDecodeError, OSError):
-            continue
-    return sorted(seasons, key=_season_sort_key)
+    """读取内置赛季，并用已启用的本地资源包进行补充或覆盖。"""
+    return get_content_repository().load_seasons()
 
 
 def get_latest_season() -> dict | None:
