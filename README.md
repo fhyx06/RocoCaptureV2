@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <img src="https://cos.blanktime.cn/assets/images/%E6%B0%B4%E8%93%9D%E8%93%9D.png" alt="LOGO" width="256" height="256" />
 </p>
@@ -26,7 +28,7 @@
 
 ## 快速开始
 
-**提示：如果您下载的是 Releases 页面已打包的程序**，无需安装 Python 环境和依赖。完整解压 portable 压缩包后，双击目录下的 `RocoCaptureV2-vx.x.x.exe` 即可启动。v0.3.2 portable 已预装 S3 v1 资源，首次启动即可使用 S1、S2、S3；程序会在当前目录维护 `saves` 与 `data/content`。
+**提示：如果您下载的是 Releases 页面已打包的程序**，无需安装 Python 环境和依赖。完整解压 portable 压缩包后，双击目录下的 `RocoCaptureV2-vx.x.x.exe` 即可启动。v0.3.2 portable 已预装 S3 v1 资源，首次启动即可使用 S1、S2、S3；程序会在程序所在目录维护 `saves` 与 `data/content`。
 
 ### 环境要求
 
